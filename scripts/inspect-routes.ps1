@@ -42,16 +42,21 @@ $targetResults = @(foreach ($hostValue in @($TargetHost | Sort-Object -Unique)) 
     $addresses = @()
     $resolutionError = $null
     $parsedAddress = $null
+    # Never echo rejected input: it may contain URL credentials or query tokens.
+    $safeHost = $null
     try {
         if ([System.Net.IPAddress]::TryParse($hostValue, [ref] $parsedAddress)) {
             if ($parsedAddress.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
                 throw 'IPv6 input is outside this IPv4 diagnostic script.'
             }
+            $safeHost = $parsedAddress.IPAddressToString
             $addresses = @($parsedAddress.IPAddressToString)
         } else {
-            if ($hostValue -match '[/\\:@\s]') {
+            if ($hostValue -match '[/\\:@\s]' -or
+                [System.Uri]::CheckHostName($hostValue) -ne [System.UriHostNameType]::Dns) {
                 throw 'Provide a hostname or IPv4 address, without URL scheme, path, credentials or port.'
             }
+            $safeHost = $hostValue
             $addresses = @(Resolve-DnsName -Name $hostValue -Type A -DnsOnly |
                 Where-Object { $_.Type -eq 'A' } |
                 Select-Object -ExpandProperty IPAddress | Sort-Object -Unique)
@@ -79,7 +84,7 @@ $targetResults = @(foreach ($hostValue in @($TargetHost | Sort-Object -Unique)) 
         }
     })
     [pscustomobject]@{
-        Host = $hostValue
+        Host = $safeHost
         IPv4Addresses = $addresses
         ResolutionError = $resolutionError
         Routes = $routesForAddresses

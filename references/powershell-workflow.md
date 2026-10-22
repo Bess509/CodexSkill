@@ -22,13 +22,17 @@ Find-NetRoute -RemoteIPAddress '192.0.2.10'
 
 从采集结果查证物理接口、当前网关和所有目标 IP，再逐个填写。不能假定物理默认出口必然能访问内网。
 
+同一服务的全部 A 记录及本次确认的必要登录依赖作为一个批次；按 IP 去重。修改前保存整个批次的计划与原始状态，逐条更新实际变更日志。下面展示单目标字段，处理多 IP 时每个目标使用独立记录，不覆盖前一条记录。
+
 ```powershell
+$ErrorActionPreference = 'Stop'
 $targetIp = '192.0.2.10'        # 替换；多个 A 记录逐条处理
 $prefix = "$targetIp/32"
 $physicalIndex = 12            # 替换为查证的物理接口索引
 $physicalGateway = '192.0.2.1'  # 替换为该接口当前网关
 $plannedMetric = 1
-$backupDir = Join-Path $env:TEMP ('vpn-route-audit-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$backupRoot = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'VpnRouteBackups'
+$backupDir = Join-Path $backupRoot ('vpn-route-audit-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $backupDir -ErrorAction Stop | Out-Null
 
 # 先完整读取，再过滤，避免把读取失败当作不存在。
@@ -46,11 +50,26 @@ $record = [ordered]@{
     PersistentBefore = @($persistentBefore | Select-Object DestinationPrefix, InterfaceIndex, NextHop, RouteMetric)
     EffectiveBefore = @(Find-NetRoute -RemoteIPAddress $targetIp | Select-Object DestinationPrefix, InterfaceIndex, NextHop, IPAddress, RouteMetric)
 }
-$record | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $backupDir 'before.json') -Encoding UTF8
-route.exe PRINT -4 | Set-Content -LiteralPath (Join-Path $backupDir 'route-print-before.txt') -Encoding UTF8
+$backupPath = Join-Path $backupDir 'before.json'
+$record | ConvertTo-Json -Depth 8 -ErrorAction Stop |
+    Set-Content -LiteralPath $backupPath -Encoding UTF8 -ErrorAction Stop
+$routePrint = @(route.exe PRINT -4)
+if ($LASTEXITCODE -ne 0 -or $routePrint.Count -eq 0) { throw '路由表导出失败，停止变更' }
+$routePrintPath = Join-Path $backupDir 'route-print-before.txt'
+$routePrint | Set-Content -LiteralPath $routePrintPath -Encoding UTF8 -ErrorAction Stop
+
+# 写入和读回任一步失败都必须终止，不能继续进入 New-NetRoute。
+$savedRecord = Get-Content -LiteralPath $backupPath -Raw -Encoding UTF8 -ErrorAction Stop |
+    ConvertFrom-Json -ErrorAction Stop
+if ($savedRecord.Prefix -ne $prefix -or
+    $savedRecord.PlannedInterfaceIndex -ne $physicalIndex -or
+    $savedRecord.PlannedNextHop -ne $physicalGateway -or
+    $savedRecord.PlannedMetric -ne $plannedMetric) { throw '备份读回核验失败，停止变更' }
+$savedPrint = Get-Content -LiteralPath $routePrintPath -Raw -Encoding UTF8 -ErrorAction Stop
+if ([string]::IsNullOrWhiteSpace($savedPrint)) { throw '路由表备份为空，停止变更' }
 ```
 
-同时保存 DNS、接口别名/描述、地址/网关和业务测试范围。备份在第一条变更之前完成；逐条日志区分原已存在、临时创建、持久创建和失败恢复，成功后追加实际创建的精确规则。不能只保存期望计划。将备份移到用户资料目录后再把长期回滚路径交付用户，临时目录可能被清理。
+同时保存 DNS、接口别名/描述、地址/网关和业务测试范围。默认备份到文档目录，也可改为用户指定的持久资料目录。所有原始备份和计划在第一条变更之前完成；日志区分原已存在、临时创建、持久创建和失败恢复。修改后立即记录实际结果，不能只保存期望计划。日志续写失败时停止后续新增操作，利用先前备份及内存中的精确变更记录清理已创建项，并报告记录缺口。
 
 检查管理员权限：
 
@@ -76,6 +95,13 @@ Find-NetRoute -RemoteIPAddress $targetIp
 
 记录本次确实创建的 `$createdTemporary`，验证有效选路选中预期 `/32`、接口和下一跳，再测业务。VPN `/1` 比物理 `/0` 更具体；`/32` 覆盖单一主机流量。
 
+## 停止与失败清理
+
+- 全批临时选路核验通过，且服务域名的网络/TLS 验证通过，才能进入持久化。逐 IP 应用测试没做时明确记录未测，不能据域名的一次成功声称每个 IP 的应用均成功。
+- 任一目标选路错误、网络连接或 TLS 失败时，不持久化；按“精确回滚”撤销本批新建临时规则，保留原有/复用规则。多 IP 部分成功默认也清理本批新增规则，避免留下一半生效的配置；用户另有明确的分批保留要求时按其范围执行并列出结果。
+- HTTP 登录跳转、401/403 或数据库鉴权失败应单独归类。若已证实网络路径和 TLS 有效，不能将账号权限问题当作网络失败；根据任务范围报告授权未通过，不修改账号权限，也不声称业务访问完整成功。
+- 查询失败、规则被第三方修改或无法精确确认归属时，停止自动删除。报告尚存规则和具体阻塞；不盲目重试、清表或扩大分流范围。
+
 ## 持久化
 
 本机 `route.exe /?` 说明：`-p` 配合 ADD 可跨重启保留。不直接改注册表。
@@ -85,12 +111,12 @@ route.exe -p -4 ADD $targetIp MASK 255.255.255.255 $physicalGateway METRIC $plan
 $addExitCode = $LASTEXITCODE
 ```
 
-规则完全一致且持久表已有记录时跳过 ADD，标记为复用。若同一临时规则导致 ADD 冲突：
+规则完全一致且活动选路也正确时复用。仅持久表已有记录、活动选路仍不正确时，不能直接判定完成；先查明激活/选路原因，不覆盖旧记录。若同一临时规则导致 ADD 冲突：
 
 1. 先重读活动/持久表，核对临时规则确实由本次创建、变更前没有同前缀规则、且未发生第三方变更。
 2. 仅对该精确 CIM 对象执行 `Remove-NetRoute -InputObject $createdTemporary -Confirm:$false -ErrorAction Stop`。
 3. 立即执行上述持久 ADD，并保存退出码及输出。
-4. ADD 失败则重读两表，排除部分成功和并发变更。若本次临时规则确实缺失，使用之前相同的 `New-NetRoute ... -PolicyStore ActiveStore` 恢复；核验恢复选路，记录结果，停止后续变更并报告。不能删除后失败就退出。
+4. ADD 失败则重读两表，排除部分成功和并发变更。若本次临时规则确实缺失且无冲突，使用之前相同的 `New-NetRoute ... -PolicyStore ActiveStore` 恢复；核验恢复选路并记录结果。停止新增操作，随后按日志回滚本批新建永久与临时规则，恢复批次开始前的状态；不能删除后失败就退出，或将部分持久化当作全批完成。恢复/回滚失败则报告精确剩余状态，不掩盖异常。
 
 来自更早任务或他人的临时规则不能套用此删除流程；先调查并准备精确恢复。`New-NetRoute -PolicyStore PersistentStore` 在部分环境可能写入失败，根据实际错误改用支持的 `route.exe -p ADD`，不能将失败当作已持久化。
 
