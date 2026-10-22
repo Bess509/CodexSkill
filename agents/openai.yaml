@@ -1,0 +1,4 @@
+interface:
+  display_name: "Windows VPN 永久直连路由"
+  short_description: "诊断 VPN 下网站与数据库访问，配置并验证 Windows 永久直连路由"
+  default_prompt: "使用 $windows-vpn-routes 检查指定网站或数据库在 VPN 下的访问路径，并将确认有效的直连路由设为永久生效。"
