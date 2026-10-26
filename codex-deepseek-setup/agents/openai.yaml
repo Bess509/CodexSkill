@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex 接入 DeepSeek"
+  short_description: "备份配置与登录态，接入 DeepSeek，验证连接并支持回滚和双配置规划"
+  default_prompt: "使用 $codex-deepseek-setup 帮我备份当前 Codex 配置和登录态，接入 DeepSeek 并验证连接。"

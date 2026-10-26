@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex 规划验收 · Claude 执行"
+  short_description: "Codex 负责规划验收与报告，Claude Code 执行并按验收反馈持续返修"
+  default_prompt: "使用 $codex-claude-delivery，由 Codex 规划、验收和出报告，调用本机 Claude Code 执行当前任务，未通过验收时继续返修。"
