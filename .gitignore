@@ -3,3 +3,25 @@
 
 # 避免嵌套仓库被当作子模块占位
 **/.git/
+
+# 本机配置和认证文件；仅提交明确命名的示例模板
+.env
+.env.*
+!.env.example
+auth.json
+config.toml
+config.yaml
+models.json
+
+# 运行环境与生成物
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+logs/
+*.log
+*.pid
+work/
+outputs/
+.backup*/
+backup-*/
