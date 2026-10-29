@@ -11,7 +11,7 @@
 | [anthropic-to-openai-bridge](anthropic-to-openai-bridge/SKILL.md) | 将 Anthropic Messages 上游接入使用 OpenAI Chat Completions 的 WorkBuddy，提供代理部署和排障流程 | 固定版本协议转换、工具调用双向映射、流式处理、进程身份复核、诊断转储默认关闭 |
 | [codex-claude-delivery](codex-claude-delivery/SKILL.md) | 用户明确要求协作时，由 Codex 规划和独立验收，本机 Claude Code 执行与返修 | 可检查的任务单、业务概念资料、执行权限边界、返修停止条件、逐项验收证据 |
 | [codex-deepseek-setup](codex-deepseek-setup/SKILL.md) | 在 Windows Codex 桌面端或 CLI 中配置 DeepSeek，处理模型目录、认证、连接测试与回滚 | 配置和认证分别备份、按实际版本核对参数、四层验证、双配置隔离 |
-| [windows-vpn-routes](windows-vpn-routes/SKILL.md) | VPN 开启时诊断指定服务的选路，配置、验证和回滚 IPv4 永久直连路由 | 只读取证、最小 `/32` 路由、临时验证后持久化、精确回滚、区分网络与业务授权 |
+| [windows-vpn-routes](windows-vpn-routes/SKILL.md) | VPN 开启时诊断指定服务的选路，配置、验证和回滚 IPv4 永久直连路由 | 只读取证、甄别伪造响应、物理路径预验证、最小 `/32` 路由、临时验证后持久化、精确回滚、区分网络与业务授权 |
 
 ## 1. Anthropic 协议桥接
 
@@ -79,6 +79,8 @@ WorkBuddy → OpenAI Chat Completions → 本地 LiteLLM 代理 → Anthropic Me
 
 - **先采集证据。** 同时查看 DNS A 记录、网卡、网关、活动路由和持久路由。
 - **针对实际选路诊断。** 检查 VPN 的 `/1` 等更具体路由，并用 `Find-NetRoute` 验证出口。
+- **甄别伪造响应。** VPN 隧道网关可能在应用层伪造 404/重置，需用源地址绑定对照两条路径的响应后再归因。
+- **预验证物理路径。** 加路由前先用物理接口源地址直连目标确认可达，避免把流量切到不通的出口。
 - **控制变更范围。** 默认使用 IPv4 `/32` 主机路由，保留其他应用和默认路由的设置。
 - **先临时验证，再持久化。** 分别核验有效选路、持久表和应用层结果。
 - **回滚依据实际创建记录。** 精确处理本次新增规则，保护已有路由。
